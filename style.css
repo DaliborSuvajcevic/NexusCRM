@@ -1,0 +1,273 @@
+/* ========================================
+   NEXUSCRM - Stylesheet
+   ======================================== */
+
+/* ========== FONTOVI ========== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ========== OSNOVNE UTILITIES ========== */
+.hidden {
+  display: none !important;
+}
+
+/* ========== GLOBAL STYLES ========== */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #f1f5f9;
+  margin: 0;
+  padding: 0;
+}
+
+/* ========== CUSTOM BOJE - TEXT ========== */
+.text-primary { color: #4338ca !important; }
+.text-secondary { color: #5b21b6 !important; }
+.text-success { color: #10b981 !important; }
+.text-warning { color: #f59e0b !important; }
+.text-danger { color: #ef4444 !important; }
+
+/* ========== CUSTOM BOJE - BACKGROUND ========== */
+.bg-primary { background-color: #4338ca !important; }
+.bg-warning { background-color: #f59e0b !important; }
+.bg-secondary { background-color: #5b21b6 !important; }
+.bg-success { background-color: #10b981 !important; }
+.bg-danger { background-color: #ef4444 !important; }
+
+/* ========== MODAL ========== */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+.modal.active {
+  display: flex;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+}
+
+/* ========== STATUS BADGE ========== */
+.status-badge.new {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+  border: 1px solid #f59e0b;
+}
+
+.status-badge.progress {
+  background-color: rgba(67, 56, 202, 0.15);
+  color: #4338ca;
+  border: 1px solid #4f46e5;
+}
+
+.status-badge.closed {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #047857;
+  border: 1px solid #10b981;
+}
+
+/* ========== STATUS DOT ========== */
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.dot-new { background-color: #f59e0b; }
+.dot-progress { background-color: #4f46e5; }
+.dot-closed { background-color: #10b981; }
+
+/* ========== ANIMACIJE ========== */
+/* Fade In */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pulse */
+.pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(67, 56, 202, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(67, 56, 202, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(67, 56, 202, 0);
+  }
+}
+
+/* ========== TABLE ========== */
+.table-container {
+  overflow-x: auto;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+/* ========== FOCUS STATES ZA PRISTUPAČNOST ========== */
+button:focus-visible, 
+input:focus-visible, 
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #4338ca;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(67, 56, 202, 0.1);
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ========== LOADING SPINNER ========== */
+.spinner {
+  display: inline-block;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid white;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ========== TOAST NOTIFICATIONS ========== */
+#toast-notification {
+  z-index: 100;
+  min-width: 280px;
+  max-width: 400px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+}
+
+@keyframes toastSlide {
+  from { transform: translateX(400px) scale(0.9); opacity: 0; }
+  to { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+@keyframes toastSlideOut {
+  from { transform: translateX(0) scale(1); opacity: 1; }
+  to { transform: translateX(400px) scale(0.9); opacity: 0; }
+}
+
+/* ========== CUSTOM SCROLLBAR ========== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+/* ========== PASSWORD TOGGLE ========== */
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.2s;
+}
+
+.password-toggle:hover {
+  color: #475569;
+}
+
+.password-toggle:focus {
+  outline: none;
+  color: #4338ca;
+}
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 768px) {
+  /* Modal na malim ekranima */
+  .modal .bg-white {
+    width: 95% !important;
+    max-width: none !important;
+    margin: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  
+  /* Compact status badge */
+  .status-badge {
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.75rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Još kompaktniji prikaz */
+  .px-6 { padding-left: 1rem !important; padding-right: 1rem !important; }
+  .py-4 { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
+}
