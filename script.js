@@ -1,635 +1,446 @@
-document.addEventListener('DOMContentLoaded', () => {
-  // === Selekcija elemenata ===
-  const authModal = document.getElementById('authModal');
-  const appContent = document.getElementById('appContent');
-  const loginForm = document.getElementById('loginForm');
-  const registerForm = document.getElementById('registerForm');
-  const toggleAuthBtn = document.getElementById('toggleAuth');
-  const logoutBtn = document.querySelector('.fa-sign-out-alt')?.closest('button');
-  const modal = document.getElementById('leadModal');
-  const openModalBtn = document.getElementById('openModalBtn');
-  const closeModalBtn = document.getElementById('closeModalBtn');
-  const leadForm = document.getElementById('leadForm');
-  const searchInput = document.getElementById('search');
-  const tbody = document.querySelector('tbody');
+/* PRODUCT LAB · CRM
+   Client-side lead pipeline for AI Product Lab. No backend: data lives in this browser's localStorage. */
+(() => {
+  'use strict';
 
-  let isLoginMode = true;
-  let currentEditRow = null;
-  let filteredLeadsCache = null;
-  let lastSearchTerm = '';
-  let currentPage = 1;
-  const ITEMS_PER_PAGE = 4; // Broj leadova po stranici
-  let totalLeadsCount = 0;
+  /* ---------- Config ---------- */
+  const STORE_KEY = 'plcrm.v1.leads';          // namespaced: all github.io sites share one localStorage origin
+  const LANG_KEY = 'plcrm.lang';
+  const LEGACY_KEY = 'leads';                  // old NexusCRM key
+  const MIGRATED_FLAG = 'plcrm.v1.migrated';
+  const STAGES = ['new', 'talking', 'brief', 'production', 'delivered', 'won', 'lost'];
+  const OPEN_STAGES = ['new', 'talking', 'brief', 'production', 'delivered'];
+  const SOURCES = ['instagram', 'website', 'referral', 'other'];
+  const PACKAGES = { START: 49, GROW: 99, BRAND: 199, CUSTOM: null };
 
-  // === Pomoćne funkcije ===
+  /* ---------- State ---------- */
+  let leads = [];
+  let lang = 'sr';
+  let activeStage = 'all';
+  let searchTerm = '';
+  let sortMode = 'follow';
+  let editingId = null;
+  let storageOk = true;
+
+  /* ---------- Helpers ---------- */
   const $ = (id) => document.getElementById(id);
-  const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
-  
-  // Toast notifications
-  const showToast = (message, type = 'info', duration = 3000) => {
-    const existingToast = document.getElementById('toast-notification');
-    if (existingToast) existingToast.remove();
-    
-    const toast = document.createElement('div');
-    toast.id = 'toast-notification';
-    toast.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg text-white font-medium z-[100] transform transition-all ${
-      type === 'success' ? 'bg-green-600' : 
-      type === 'error' ? 'bg-red-600' : 'bg-blue-600'
-    }`;
-    toast.style.animation = 'toastSlide 0.3s ease-out';
-    toast.innerHTML = `
-      <div class="flex items-center">
-        <i class="fas ${
-          type === 'success' ? 'fa-check-circle' : 
-          type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'
-        } mr-2"></i>
-        ${message}
-      </div>
-    `;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.style.animation = 'toastSlideOut 0.3s ease-out';
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
+  const t = (key) => (I18N[lang] && I18N[lang][key]) || I18N.sr[key] || key;
+  const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+  const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+  const isEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  const money = (n) => new Intl.NumberFormat(lang === 'sr' ? 'sr-Latn-RS' : 'en-GB', { maximumFractionDigits: 0 }).format(n || 0) + ' €';
+  const cleanHandle = (v) => String(v || '').trim()
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+    .replace(/^@/, '').split(/[/?#\s]/)[0]
+    .replace(/[^A-Za-z0-9._]/g, '').slice(0, 30);
+  const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const svg = (path) => {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = path; return s;
+  };
+  const ICON = {
+    cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+    ig: '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r=".6" fill="currentColor"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'
   };
 
-  // CSS za toast animacije
-  if (!document.getElementById('toast-styles')) {
-    const style = document.createElement('style');
-    style.id = 'toast-styles';
-    style.textContent = `
-      @keyframes toastSlide {
-        from { transform: translateX(400px) scale(0.9); opacity: 0; }
-        to { transform: translateX(0) scale(1); opacity: 1; }
-      }
-      @keyframes toastSlideOut {
-        from { transform: translateX(0) scale(1); opacity: 1; }
-        to { transform: translateX(400px) scale(0.9); opacity: 0; }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  const saveLeads = () => localStorage.setItem('leads', JSON.stringify(leads));
-  const saveUsers = (users) => localStorage.setItem('users', JSON.stringify(users));
-  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  
-  // Escape HTML za XSS zaštitu
-  const escapeHtml = (str) => {
-    if (!str) return '';
-    return str.toString().replace(/[&<>"']/g, m => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    }[m]));
-  };
-
-  // Debounce funkcija
-  const debounce = (func, wait) => {
-    let timeout;
-    return function executedFunction(...args) {
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
+  /* ---------- Storage ---------- */
+  const normalize = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const stage = STAGES.includes(raw.stage) ? raw.stage : 'new';
+    const value = Number(raw.value);
+    return {
+      id: str(raw.id, 64) || uid(),
+      name: str(raw.name, 120),
+      brand: str(raw.brand, 120),
+      instagram: cleanHandle(raw.instagram),
+      email: str(raw.email, 160),
+      phone: str(raw.phone, 40),
+      source: SOURCES.includes(raw.source) ? raw.source : 'other',
+      product: str(raw.product, 160),
+      package: Object.prototype.hasOwnProperty.call(PACKAGES, raw.package) ? raw.package : '',
+      value: Number.isFinite(value) && value >= 0 ? Math.round(value) : 0,
+      stage,
+      followUp: /^\d{4}-\d{2}-\d{2}$/.test(raw.followUp) ? raw.followUp : '',
+      notes: str(raw.notes, 4000),
+      createdAt: str(raw.createdAt, 40) || new Date().toISOString(),
+      updatedAt: str(raw.updatedAt, 40) || new Date().toISOString(),
+      wonAt: stage === 'won' ? (str(raw.wonAt, 40) || str(raw.updatedAt, 40) || new Date().toISOString()) : ''
     };
   };
 
-  // ========== NOVE FUNKCIJE ZA AVATAR ========== //
-  
-  // Uzmi inicijal iz username-a
-  const getInitial = (username) => {
-    if (!username) return 'U';
-    return username.charAt(0).toUpperCase();
+  const load = () => {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+      leads = Array.isArray(data) ? data.map(normalize).filter(Boolean) : [];
+    } catch (e) { leads = []; }
   };
 
-  // Generiši boju za avatar na osnovu username-a
-  const getAvatarColor = (username) => {
-    if (!username) return '#4338ca'; // default plava
-    
-    // Hash funkcija za generisanje konzistentne boje
-    let hash = 0;
-    for (let i = 0; i < username.length; i++) {
-      hash = username.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    
-    // Generiši boju na osnovu hash-a
-    const colors = [
-      '#4338ca', // indigo
-      '#5b21b6', // purple
-      '#9333ea', // violet
-      '#06b6d4', // cyan
-      '#0ea5e9', // sky
-      '#3b82f6', // blue
-      '#8b5cf6', // purple-500
-      '#ec4899', // pink
-      '#ef4444', // red
-      '#f59e0b'  // amber
-    ];
-    
-    return colors[Math.abs(hash) % colors.length];
+  const save = () => {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(leads)); storageOk = true; }
+    catch (e) { if (storageOk) toast(t('t_storage_err'), true); storageOk = false; }
   };
 
-  // Ažuriraj korisnički UI sa avatarom
-  const updateUserUI = (username) => {
-    const userNameEl = document.getElementById('userNameDisplay');
-    const userEmailEl = document.getElementById('userEmailDisplay');
-    const avatarEl = document.getElementById('userAvatar');
-    
-    if (!username) return;
-    
-    // Uzmi podatke iz localStorage
-    const users = JSON.parse(localStorage.getItem('users') || '{}');
-    const user = users[username];
-    
-    // Podesi ime
-    if (userNameEl) {
-      userNameEl.textContent = username;
-    }
-    
-    // Podesi email
-    if (userEmailEl) {
-      let email = username + '@example.com';
-      if (user?.email) email = user.email;
-      else if (username === 'admin') email = 'admin@example.com';
-      userEmailEl.textContent = email;
-    }
-    
-    // Podesi avatar sa inicijalom i bojom
-    if (avatarEl) {
-      avatarEl.textContent = getInitial(username);
-      avatarEl.style.backgroundColor = getAvatarColor(username);
-    }
+  /* One-time move of data from the old NexusCRM version (key "leads", statuses New / In Progress / Closed). */
+  const migrateLegacy = () => {
+    try {
+      if (localStorage.getItem(MIGRATED_FLAG) || localStorage.getItem(STORE_KEY)) return 0;
+      const old = JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null');
+      if (!Array.isArray(old) || !old.length) return 0;
+      localStorage.setItem(MIGRATED_FLAG, '1');
+      const map = { 'New': 'new', 'In Progress': 'talking', 'Closed': 'won' };
+      const srcMap = { Instagram: 'instagram', Website: 'website', Referral: 'referral' };
+      leads = old.map((o) => normalize({
+        name: o.name, email: o.email, phone: o.phone,
+        source: srcMap[o.source] || 'other',
+        stage: map[o.status] || 'new',
+        notes: o.notes,
+        createdAt: o.id ? new Date(Number(o.id)).toISOString() : undefined
+      })).filter(Boolean);
+      save();
+      return leads.length;
+    } catch (e) { return 0; }
   };
 
- 
- // === Inicijalni podaci ===
-let leads = JSON.parse(localStorage.getItem('leads')) || []; // ✅ SAMO OVO MENJATE
+  /* ---------- i18n ---------- */
+  const applyLang = (next, persist) => {
+    lang = next === 'en' ? 'en' : 'sr';
+    document.documentElement.lang = lang;
+    document.title = t('title');
+    document.querySelectorAll('[data-i18n]').forEach((n) => { n.textContent = t(n.dataset.i18n); });
+    document.querySelectorAll('[data-i18n-html]').forEach((n) => { n.innerHTML = t(n.dataset.i18nHtml); }); // trusted static copy only
+    document.querySelectorAll('[data-i18n-attr]').forEach((n) => {
+      n.dataset.i18nAttr.split(';').forEach((pair) => {
+        const [attr, key] = pair.split(':');
+        if (attr && key) n.setAttribute(attr.trim(), t(key.trim()));
+      });
+    });
+    document.querySelectorAll('.lang-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+    fillStageSelect($('fStage'));
+    if (persist) { try { localStorage.setItem(LANG_KEY, lang); } catch (e) {} }
+    render();
+  };
 
-if (!localStorage.getItem('leads')) {
-  saveLeads(); // Sa praznim nizom []
-}
-totalLeadsCount = leads.length;
+  const fillStageSelect = (select, current) => {
+    const keep = current || select.value;
+    select.innerHTML = '';
+    STAGES.forEach((s) => { const o = el('option', null, t('stage_' + s)); o.value = s; select.appendChild(o); });
+    if (keep) select.value = keep;
+  };
 
-  if (!localStorage.getItem('leads')) saveLeads();
-  totalLeadsCount = leads.length;
+  const plural = (n) => {
+    if (lang === 'en') return n === 1 ? t('count_one') : t('count_many');
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return t('count_one');
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return t('count_few');
+    return t('count_many');
+  };
 
-  // === Modal funkcije ===
-  const openModal = () => {
-    if (modal?.classList.contains('active')) return;
-    modal?.classList.add('active');
+  /* ---------- Derived data ---------- */
+  const followState = (lead) => {
+    if (!lead.followUp || !OPEN_STAGES.includes(lead.stage)) return '';
+    const today = todayISO();
+    if (lead.followUp < today) return 'overdue';
+    if (lead.followUp === today) return 'due';
+    return 'later';
+  };
+
+  const matchesSearch = (lead) => {
+    if (!searchTerm) return true;
+    const hay = [lead.name, lead.brand, lead.instagram, '@' + lead.instagram, lead.email, lead.phone, lead.product, lead.notes].join(' ').toLowerCase();
+    return hay.includes(searchTerm);
+  };
+
+  const visibleLeads = () => {
+    const list = leads.filter((l) => (activeStage === 'all' || l.stage === activeStage) && matchesSearch(l));
+    const rank = { overdue: 0, due: 1, later: 2, '': 3 };
+    list.sort((a, b) => {
+      if (sortMode === 'value') return b.value - a.value || b.createdAt.localeCompare(a.createdAt);
+      if (sortMode === 'new') return b.createdAt.localeCompare(a.createdAt);
+      const ra = rank[followState(a)], rb = rank[followState(b)];
+      if (ra !== rb) return ra - rb;
+      if (a.followUp && b.followUp && a.followUp !== b.followUp) return a.followUp.localeCompare(b.followUp);
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+    return list;
+  };
+
+  const formatDate = (iso) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(lang === 'sr' ? 'sr-Latn-RS' : 'en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  /* ---------- Render ---------- */
+  const renderStats = () => {
+    const open = leads.filter((l) => OPEN_STAGES.includes(l.stage));
+    const month = todayISO().slice(0, 7);
+    const wonMonth = leads.filter((l) => l.stage === 'won' && l.wonAt && l.wonAt.slice(0, 7) === month);
+    const due = open.filter((l) => ['due', 'overdue'].includes(followState(l)));
+    $('statOpen').textContent = open.length;
+    $('statPipeline').textContent = money(open.reduce((s, l) => s + l.value, 0));
+    $('statWon').textContent = money(wonMonth.reduce((s, l) => s + l.value, 0));
+    $('statDue').textContent = due.length;
+    $('statDue').closest('.stat').classList.toggle('alert', due.some((l) => followState(l) === 'overdue'));
+  };
+
+  const renderChips = () => {
+    const wrap = $('stageChips');
+    wrap.innerHTML = '';
+    const make = (key, label, count) => {
+      const b = el('button', 'chip');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(activeStage === key));
+      if (key !== 'all') b.dataset.stage = key;
+      b.append(document.createTextNode(label), el('em', null, String(count)));
+      b.addEventListener('click', () => { activeStage = key; render(); });
+      wrap.appendChild(b);
+    };
+    make('all', t('all'), leads.length);
+    STAGES.forEach((s) => make(s, t('stage_' + s), leads.filter((l) => l.stage === s).length));
+  };
+
+  const leadCard = (lead) => {
+    const card = el('article', 'lead-card' + (lead.stage === 'won' ? ' is-won' : '') + (lead.stage === 'lost' ? ' is-lost' : ''));
+    card.dataset.id = lead.id;
+
+    const top = el('div', 'lead-top');
+    const display = lead.name || (lead.instagram ? '@' + lead.instagram : '?');
+    top.appendChild(el('div', 'avatar', display.replace('@', '').charAt(0).toUpperCase() || '?'));
+    const id = el('div', 'lead-id');
+    id.appendChild(el('h3', null, display));
+    const sub = [lead.brand, lead.instagram && lead.name ? '@' + lead.instagram : ''].filter(Boolean).join(' · ');
+    if (sub) id.appendChild(el('p', null, sub));
+    top.appendChild(id);
+    if (lead.value || lead.package) {
+      const v = el('div', 'lead-value');
+      v.appendChild(el('strong', null, lead.value ? money(lead.value) : '—'));
+      if (lead.package) v.appendChild(el('span', null, lead.package));
+      top.appendChild(v);
+    }
+    card.appendChild(top);
+
+    if (lead.product) card.appendChild(el('p', 'lead-product', lead.product));
+
+    const meta = el('div', 'lead-meta');
+    const sel = el('select', 'stage-select');
+    sel.dataset.stage = lead.stage;
+    sel.setAttribute('aria-label', t('stage_change'));
+    fillStageSelect(sel, lead.stage);
+    sel.addEventListener('change', () => updateStage(lead.id, sel.value));
+    meta.appendChild(sel);
+
+    const fs = followState(lead);
+    const f = el('span', 'follow' + (fs === 'due' ? ' due' : fs === 'overdue' ? ' overdue' : ''));
+    f.appendChild(svg(ICON.cal));
+    let ftxt = t('no_followup');
+    if (lead.followUp) ftxt = (fs === 'overdue' ? t('overdue') + ' · ' : '') + (fs === 'due' ? t('today') : formatDate(lead.followUp));
+    f.appendChild(document.createTextNode(ftxt));
+    if (lead.followUp || OPEN_STAGES.includes(lead.stage)) meta.appendChild(f);
+    card.appendChild(meta);
+
+    const actions = el('div', 'lead-actions');
+    actions.appendChild(el('span', 'src', t({ instagram: 'src_ig', website: 'src_site', referral: 'src_ref', other: 'src_other' }[lead.source])));
+    actions.appendChild(el('span', 'spacer'));
+    if (lead.instagram) {
+      const a = el('a', 'icon-btn');
+      a.href = 'https://www.instagram.com/' + encodeURIComponent(lead.instagram) + '/';
+      a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.setAttribute('aria-label', t('open_ig')); a.title = t('open_ig');
+      a.appendChild(svg(ICON.ig));
+      actions.appendChild(a);
+    }
+    if (lead.email && isEmail(lead.email)) {
+      const a = el('a', 'icon-btn');
+      a.href = 'mailto:' + encodeURIComponent(lead.email).replace('%40', '@');
+      a.setAttribute('aria-label', t('send_email')); a.title = t('send_email');
+      a.appendChild(svg(ICON.mail));
+      actions.appendChild(a);
+    }
+    const ed = el('button', 'icon-btn');
+    ed.type = 'button';
+    ed.setAttribute('aria-label', t('edit')); ed.title = t('edit');
+    ed.appendChild(svg(ICON.edit));
+    ed.addEventListener('click', () => openModal(lead.id));
+    actions.appendChild(ed);
+    card.appendChild(actions);
+    return card;
+  };
+
+  const render = () => {
+    renderStats();
+    renderChips();
+    const list = visibleLeads();
+    const grid = $('leadGrid');
+    grid.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    list.forEach((l) => frag.appendChild(leadCard(l)));
+    grid.appendChild(frag);
+    $('emptyState').classList.toggle('hidden', list.length > 0);
+    $('resultCount').textContent = list.length + ' ' + plural(list.length);
+  };
+
+  /* ---------- Actions ---------- */
+  const updateStage = (id, stage) => {
+    const lead = leads.find((l) => l.id === id);
+    if (!lead || !STAGES.includes(stage)) return;
+    if (stage === 'won' && lead.stage !== 'won') lead.wonAt = new Date().toISOString();
+    if (stage !== 'won') lead.wonAt = '';
+    lead.stage = stage;
+    lead.updatedAt = new Date().toISOString();
+    save(); render(); toast(t('t_stage'));
+  };
+
+  const modal = $('leadModal');
+  const form = $('leadForm');
+  let lastFocus = null;
+
+  const openModal = (id) => {
+    editingId = id || null;
+    const lead = id ? leads.find((l) => l.id === id) : null;
+    form.reset();
+    form.querySelectorAll('.invalid').forEach((n) => n.classList.remove('invalid'));
+    fillStageSelect($('fStage'), lead ? lead.stage : 'new');
+    $('modalTitle').textContent = lead ? t('m_edit') : t('m_new');
+    $('deleteBtn').classList.toggle('hidden', !lead);
+    if (lead) {
+      $('fName').value = lead.name; $('fBrand').value = lead.brand;
+      $('fIg').value = lead.instagram ? '@' + lead.instagram : '';
+      $('fEmail').value = lead.email; $('fPhone').value = lead.phone;
+      $('fSource').value = lead.source; $('fProduct').value = lead.product;
+      $('fPackage').value = lead.package; $('fValue').value = lead.value || '';
+      $('fFollow').value = lead.followUp; $('fNotes').value = lead.notes;
+    } else {
+      $('fSource').value = 'instagram';
+      $('fFollow').value = todayISO();
+    }
+    lastFocus = document.activeElement;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
-    currentEditRow = null;
+    setTimeout(() => $('fName').focus(), 50);
   };
 
   const closeModal = () => {
-    if (!modal?.classList.contains('active')) return;
-    modal?.classList.remove('active');
-    document.body.style.overflow = 'auto';
-    leadForm?.reset();
-    currentEditRow = null;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    editingId = null;
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
   };
 
-  // === Paginacija ===
-  const getPaginatedLeads = (leadsArray, page, pageSize = ITEMS_PER_PAGE) => {
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    return leadsArray.slice(startIndex, endIndex);
-  };
+  // Package picks a default value; a manually typed value is kept.
+  $('fPackage').addEventListener('change', (e) => {
+    const price = PACKAGES[e.target.value];
+    if (price && (!$('fValue').value || Object.values(PACKAGES).includes(Number($('fValue').value)))) $('fValue').value = price;
+  });
 
-  const updatePaginationInfo = (total, filteredCount, currentPage) => {
-    const startIndex = ((currentPage - 1) * ITEMS_PER_PAGE) + 1;
-    const endIndex = Math.min(currentPage * ITEMS_PER_PAGE, filteredCount);
-    const maxPage = Math.ceil(filteredCount / ITEMS_PER_PAGE);
-    const isLastPage = currentPage === maxPage;
-    
-    const paginationText = document.querySelector('.text-sm.text-gray-700');
-    if (paginationText) {
-      if (filteredCount === 0) {
-        paginationText.innerHTML = 'No leads found';
-      } else {
-        paginationText.innerHTML = `
-          Showing <span class="font-medium">${startIndex}</span> to 
-          <span class="font-medium">${endIndex}</span> of 
-          <span class="font-medium">${filteredCount}</span> leads
-        `;
-      }
-    }
-  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    form.querySelectorAll('.invalid').forEach((n) => n.classList.remove('invalid'));
+    const name = $('fName').value.trim();
+    const ig = cleanHandle($('fIg').value);
+    const email = $('fEmail').value.trim();
+    if (!name && !ig) { $('fName').classList.add('invalid'); $('fName').focus(); return toast(t('t_err_name'), true); }
+    if (email && !isEmail(email)) { $('fEmail').classList.add('invalid'); $('fEmail').focus(); return toast(t('t_err_email'), true); }
 
-  // === Ažuriranje statistika ===
-  const updateStats = () => {
-    const leadsToCount = filteredLeadsCache || leads;
-    const total = leadsToCount.length;
-    
-    let newCount = 0, progressCount = 0, closedCount = 0;
-    for (let i = 0; i < leadsToCount.length; i++) {
-      const status = leadsToCount[i].status;
-      if (status === 'New') newCount++;
-      else if (status === 'In Progress') progressCount++;
-      else if (status === 'Closed') closedCount++;
-    }
-    
-    setText('totalLeads', totalLeadsCount);
-    setText('newLeads', newCount);
-    setText('inProgressLeads', progressCount);
-    setText('closedLeads', closedCount);
-    setText('paginationTotal', total);
-    
-    updatePaginationInfo(totalLeadsCount, total, currentPage);
-  };
+    const now = new Date().toISOString();
+    const existing = editingId ? leads.find((l) => l.id === editingId) : null;
+    const stage = $('fStage').value;
+    const data = normalize({
+      id: existing ? existing.id : uid(),
+      name, brand: $('fBrand').value, instagram: ig, email, phone: $('fPhone').value,
+      source: $('fSource').value, product: $('fProduct').value, package: $('fPackage').value,
+      value: $('fValue').value, stage, followUp: $('fFollow').value, notes: $('fNotes').value,
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+      wonAt: stage === 'won' ? (existing && existing.stage === 'won' && existing.wonAt ? existing.wonAt : now) : ''
+    });
 
-  // === Filtriranje ===
-  const filterLeads = (term) => {
-    if (term === lastSearchTerm && filteredLeadsCache) {
-      return filteredLeadsCache;
-    }
-    
-    lastSearchTerm = term;
-    
-    if (!term.trim()) {
-      filteredLeadsCache = null;
-      return leads;
-    }
-    
-    const lowerTerm = term.toLowerCase();
-    const filtered = [];
-    for (let i = 0; i < leads.length; i++) {
-      const lead = leads[i];
-      if (
-        lead.name.toLowerCase().includes(lowerTerm) ||
-        lead.email.toLowerCase().includes(lowerTerm) ||
-        (lead.phone && lead.phone.toLowerCase().includes(lowerTerm)) ||
-        lead.source.toLowerCase().includes(lowerTerm)
-      ) {
-        filtered.push(lead);
-      }
-    }
-    
-    filteredLeadsCache = filtered;
-    return filtered;
-  };
-
-  // === Renderovanje leadova ===
-  const renderLeads = (leadsArray = leads, page = currentPage) => {
-    if (!tbody) return;
-    
-    if (leadsArray !== (filteredLeadsCache || leads)) {
-      filteredLeadsCache = null;
-      lastSearchTerm = '';
-    }
-    
-    const paginatedLeads = getPaginatedLeads(leadsArray, page);
-    
-    const fragment = document.createDocumentFragment();
-    
-    if (paginatedLeads.length === 0) {
-      const emptyRow = document.createElement('tr');
-      emptyRow.innerHTML = `
-        <td colspan="7" class="px-6 py-12 text-center">
-          <div class="text-gray-400 mb-4">
-            <i class="fas fa-inbox text-5xl"></i>
-          </div>
-          <p class="text-lg font-medium text-gray-900">No leads found</p>
-          <p class="mt-1 text-gray-500">Try adjusting your search or filters</p>
-          <button id="addFirstLead" class="mt-4 bg-primary text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">
-            <i class="fas fa-plus mr-2"></i> Add Lead
-          </button>
-        </td>
-      `;
-      fragment.appendChild(emptyRow);
-      tbody.innerHTML = '';
-      tbody.appendChild(fragment);
-      
-      document.getElementById('addFirstLead')?.addEventListener('click', openModal);
-      updateStats();
-      return;
-    }
-    
-    for (let i = 0; i < paginatedLeads.length; i++) {
-      const lead = paginatedLeads[i];
-      const statusClass = lead.status === 'New' ? 'new' : 
-                         lead.status === 'In Progress' ? 'progress' : 'closed';
-      
-      const row = document.createElement('tr');
-      row.className = 'hover:bg-gray-50 transition-colors duration-150';
-      row.dataset.id = lead.id;
-      
-      row.innerHTML = `
-        <td class="px-6 py-4 whitespace-nowrap">
-          <div class="flex items-center">
-            <div class="bg-blue-100 text-primary rounded-full w-10 h-10 flex items-center justify-center font-bold mr-3">
-              ${escapeHtml(lead.name.charAt(0).toUpperCase())}
-            </div>
-            <div>
-              <div class="text-sm font-medium text-gray-900">${escapeHtml(lead.name)}</div>
-            </div>
-          </div>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap">
-          <div class="text-sm text-gray-900">${escapeHtml(lead.email)}</div>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap hidden md:table-cell">
-          <div class="text-sm text-gray-500">${lead.phone ? escapeHtml(lead.phone) : 'N/A'}</div>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap hidden sm:table-cell">
-          <span class="px-2 inline-flex text-xs leading-5 font-medium rounded-full bg-purple-100 text-purple-800">
-            ${escapeHtml(lead.source)}
-          </span>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap">
-          <span class="status-badge ${statusClass} px-3 py-1 rounded-full text-xs font-medium inline-flex items-center">
-            <span class="status-dot dot-${statusClass}"></span> ${escapeHtml(lead.status)}
-          </span>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap hidden sm:table-cell">
-          <div class="text-sm text-gray-500">${escapeHtml(lead.createdAt)}</div>
-        </td>
-        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-          <button class="text-indigo-600 hover:text-indigo-900 mr-3 edit-btn" aria-label="Edit lead">
-            <i class="fas fa-edit"></i>
-          </button>
-          <button class="text-danger hover:text-red-800 delete-btn" aria-label="Delete lead">
-            <i class="fas fa-trash-alt"></i>
-          </button>
-        </td>
-      `;
-      
-      fragment.appendChild(row);
-    }
-    
-    tbody.innerHTML = '';
-    tbody.appendChild(fragment);
-    updateStats();
-  };
-
-  // === Finalizacija akcije ===
-  const finalizeAction = (msg, type = 'success') => {
-    saveLeads();
-    filteredLeadsCache = null;
-    lastSearchTerm = '';
-    currentPage = 1; // Reset na prvu stranicu nakon akcije
-    renderLeads(filteredLeadsCache || leads);
+    if (existing) leads[leads.indexOf(existing)] = data;
+    else leads.unshift(data);
+    save();
     closeModal();
-    showToast(msg, type);
-  };
-
-  // === Auth logika ===
-  const toggleAuth = () => {
-    isLoginMode = !isLoginMode;
-    loginForm.classList.toggle('hidden', !isLoginMode);
-    registerForm.classList.toggle('hidden', isLoginMode);
-    $('authTitle').textContent = isLoginMode ? 'Sign in to NexusCRM' : 'Create your account';
-    $('authSubtitle').textContent = isLoginMode ? 'Enter your credentials to continue' : 'Join NexusCRM today';
-    $('toggleText').textContent = isLoginMode ? "Don't have an account?" : "Already have an account?";
-    toggleAuthBtn.textContent = isLoginMode ? 'Sign up' : 'Sign in';
-  };
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    const username = $('loginUsername').value.trim();
-    const password = $('loginPassword').value;
-    const users = JSON.parse(localStorage.getItem('users') || '{}');
-    const registeredUser = users[username];
-    const valid = (username === 'admin' && password === 'password') || 
-                  (registeredUser && registeredUser.password === password);
-    
-    if (valid) {
-      localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('username', username);
-      authModal?.classList.remove('active');
-      appContent?.classList.remove('hidden');
-      
-      // AŽURIRAJ KORISNIČKI UI SA AVATAROM
-      updateUserUI(username);
-      
-      showToast(`Welcome back, ${username}!`);
-    } else {
-      showToast('Invalid credentials.', 'error');
-    }
-  };
-
-  const handleRegister = (e) => {
-    e.preventDefault();
-    const username = $('regUsername').value.trim();
-    const email = $('regEmail').value.trim();
-    const password = $('regPassword').value;
-    const confirmPassword = $('regConfirmPassword').value;
-    const users = JSON.parse(localStorage.getItem('users') || '{}');
-
-    if (!username || !email || !password) return showToast('Please fill all fields.', 'error');
-    if (password.length < 6) return showToast('Password must be at least 6 characters.', 'error');
-    if (password !== confirmPassword) return showToast('Passwords do not match.', 'error');
-    if (!isValidEmail(email)) return showToast('Please enter a valid email.', 'error');
-    if (users[username]) return showToast('Username already exists.', 'error');
-    if (Object.values(users).some(u => u.email === email)) return showToast('Email already registered.', 'error');
-
-    users[username] = { email, password };
-    saveUsers(users);
-    showToast('Account created successfully!', 'success');
-    toggleAuth();
-    registerForm.reset();
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('username');
-    authModal?.classList.add('active');
-    appContent?.classList.add('hidden');
-    showToast('Logged out successfully.');
-  };
-
-  // === Lead akcije ===
-  const handleAddEdit = (e) => {
-    e.preventDefault();
-    const submitBtn = e.submitter || document.querySelector('button[type="submit"]');
-    if (submitBtn.disabled) return;
-    
-    submitBtn.disabled = true;
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving...';
-    
-    const name = $('name').value.trim();
-    const email = $('email').value.trim();
-    const phone = $('phone').value.trim() || '';
-    const source = $('source').value;
-    const status = $('status').value;
-
-    if (!name || !email || !isValidEmail(email)) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalText;
-      return showToast('Please fill in all required fields with valid data.', 'error');
-    }
-
-    const now = new Date().toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
-    });
-
-    try {
-      if (currentEditRow) {
-        const id = parseInt(currentEditRow.dataset.id);
-        const index = leads.findIndex(l => l.id === id);
-        if (index !== -1) {
-          leads[index] = { ...leads[index], name, email, phone, source, status };
-          finalizeAction('Lead updated successfully!', 'success');
-        }
-      } else {
-        leads.unshift({ id: Date.now(), name, email, phone, source, status, createdAt: now });
-        totalLeadsCount++;
-        finalizeAction('Lead added successfully!', 'success');
-      }
-    } catch (error) {
-      console.error('Error saving lead:', error);
-      showToast('An error occurred. Please try again.', 'error');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalText;
-    }
-  };
-
-  const handleDelete = (id) => {
-    if (!confirm('Are you sure you want to delete this lead?')) return;
-    
-    const index = leads.findIndex(l => l.id === id);
-    if (index !== -1) {
-      leads.splice(index, 1);
-      totalLeadsCount--;
-      
-      // Ako je ovo bio poslednji lead na stranici, vrati na prethodnu
-      const leadsOnPage = getPaginatedLeads(filteredLeadsCache || leads, currentPage);
-      if (leadsOnPage.length === 0 && currentPage > 1) {
-        currentPage--;
-      }
-      
-      finalizeAction('Lead deleted.', 'success');
-    }
-  };
-
-  const handleEdit = (id) => {
-    const lead = leads.find(l => l.id === id);
-    if (!lead) return;
-    
-    $('name').value = lead.name;
-    $('email').value = lead.email;
-    $('phone').value = lead.phone || '';
-    $('source').value = lead.source;
-    $('status').value = lead.status;
-    openModal();
-    currentEditRow = { dataset: { id: id } };
-  };
-
-  // === Event delegation na tbody ===
-  tbody?.addEventListener('click', (e) => {
-    const row = e.target.closest('tr');
-    if (!row) return;
-    
-    const id = parseInt(row.dataset.id);
-    
-    if (e.target.closest('.delete-btn')) {
-      handleDelete(id);
-    } else if (e.target.closest('.edit-btn') || e.target.closest('.fa-edit')) {
-      handleEdit(id);
-    }
+    render();
+    toast(existing ? t('t_saved') : t('t_added'));
   });
 
-  // === Filteri ===
-  const handleFilter = (e) => {
-    const btn = e.target.closest('button.px-4.py-2');
-    if (!btn) return;
-    
-    document.querySelectorAll('button.px-4.py-2').forEach(b => {
-      b.classList.remove('bg-primary', 'text-white');
-      b.classList.add('bg-gray-100', 'text-gray-700');
-    });
-    btn.classList.remove('bg-gray-100', 'text-gray-700');
-    btn.classList.add('bg-primary', 'text-white');
-    
-    const filterText = btn.textContent.trim();
-    currentPage = 1;
-    
-    if (filterText === 'All') {
-      filteredLeadsCache = null;
-      renderLeads(leads, currentPage);
-    } else {
-      const filtered = leads.filter(l => l.status === filterText);
-      filteredLeadsCache = filtered;
-      renderLeads(filtered, currentPage);
-    }
-  };
-
-  // === Search sa debounce ===
-  const debouncedSearch = debounce((term) => {
-    const filtered = filterLeads(term);
-    currentPage = 1;
-    renderLeads(filtered, currentPage);
-  }, 300);
-
-  const handleSearch = (e) => {
-    debouncedSearch(e.target.value);
-  };
-
-  // === Pagination ===
-  const handlePagination = (direction) => {
-    const currentLeads = filteredLeadsCache || leads;
-    const maxPage = Math.ceil(currentLeads.length / ITEMS_PER_PAGE);
-    
-    if (direction === 'next' && currentPage < maxPage) {
-      currentPage++;
-      renderLeads(currentLeads, currentPage);
-    } else if (direction === 'prev' && currentPage > 1) {
-      currentPage--;
-      renderLeads(currentLeads, currentPage);
-    }
-  };
-
-  // === Event listeneri ===
-  toggleAuthBtn?.addEventListener('click', toggleAuth);
-  loginForm?.addEventListener('submit', handleLogin);
-  registerForm?.addEventListener('submit', handleRegister);
-  logoutBtn?.addEventListener('click', handleLogout);
-  openModalBtn?.addEventListener('click', openModal);
-  closeModalBtn?.addEventListener('click', closeModal);
-  modal?.addEventListener('click', (e) => e.target === modal && closeModal());
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal?.classList.contains('active')) closeModal();
-  });
-  leadForm?.addEventListener('submit', handleAddEdit);
-  
-  // Filteri
-  document.querySelector('.flex.space-x-2')?.addEventListener('click', handleFilter);
-  
-  // Search
-  searchInput?.addEventListener('input', handleSearch);
-  
-  // Pagination dugmad
-  const paginationButtons = document.querySelectorAll('button.px-4.py-2.border.border-gray-300');
-  paginationButtons.forEach((btn, index) => {
-    btn.addEventListener('click', () => handlePagination(index === 0 ? 'prev' : 'next'));
+  $('deleteBtn').addEventListener('click', () => {
+    if (!editingId || !confirm(t('confirm_delete'))) return;
+    leads = leads.filter((l) => l.id !== editingId);
+    save(); closeModal(); render(); toast(t('t_deleted'));
   });
 
-  // === Inicijalno stanje ===
-  if (localStorage.getItem('isLoggedIn') === 'true') {
-    authModal?.classList.remove('active');
-    appContent?.classList.remove('hidden');
-    
-    // AŽURIRAJ KORISNIČKI UI PRI UČITAVANJU
-    const savedUser = localStorage.getItem('username');
-    if (savedUser) {
-      updateUserUI(savedUser);
-    }
-  } else {
-    authModal?.classList.add('active');
-    appContent?.classList.add('hidden');
+  /* ---------- Backup ---------- */
+  $('exportBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify({ app: 'productlab-crm', version: 1, exportedAt: new Date().toISOString(), leads }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'productlab-crm-backup-' + todayISO() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast(t('t_exported'));
+  });
+
+  $('importInput').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        const list = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.leads) ? parsed.leads : null;
+        if (!list) throw new Error('format');
+        const clean = list.map(normalize).filter(Boolean);
+        if (!confirm(t('confirm_import'))) return;
+        leads = clean; save(); render();
+        toast(t('t_imported') + clean.length);
+      } catch (err) { toast(t('t_import_err'), true); }
+    };
+    reader.readAsText(file);
+  });
+
+  /* ---------- Toast ---------- */
+  let toastTimer;
+  function toast(msg, isError) {
+    const n = $('toast');
+    n.textContent = msg;
+    n.classList.toggle('error', !!isError);
+    n.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => n.classList.remove('show'), 2800);
   }
 
-  renderLeads();
+  /* ---------- Wiring ---------- */
+  $('newLeadBtn').addEventListener('click', () => openModal());
+  $('emptyAddBtn').addEventListener('click', () => openModal());
+  $('closeModalBtn').addEventListener('click', closeModal);
+  $('cancelBtn').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('open')) closeModal(); });
 
-  console.log('NexusCRM initialized with avatar functionality');
-});
+  let searchTimer;
+  $('search').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchTerm = e.target.value.trim().toLowerCase(); render(); }, 150);
+  });
+  $('sort').addEventListener('change', (e) => { sortMode = e.target.value; render(); });
+  document.querySelectorAll('.lang-btn').forEach((b) => b.addEventListener('click', () => applyLang(b.dataset.lang, true)));
+
+  // Keep the "today / overdue" labels correct if the tab stays open past midnight.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+
+  /* ---------- Init ---------- */
+  load();
+  const migrated = migrateLegacy();
+  let savedLang = 'sr';
+  try {
+    const q = new URLSearchParams(location.search).get('lang');
+    savedLang = q === 'en' || q === 'sr' ? q : (localStorage.getItem(LANG_KEY) || 'sr');
+  } catch (e) {}
+  applyLang(savedLang, false);
+  if (migrated) toast(t('t_migrated') + migrated);
+})();
